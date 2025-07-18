@@ -78,7 +78,8 @@ bool pal_request_msg_to_BIC_from_HOST(uint8_t netfn, uint8_t cmd)
 		}
 	}
 	if (netfn == NETFN_OEM_REQ) {
-		if (cmd == CMD_OEM_CRASH_DUMP) {
+		if (cmd == CMD_OEM_CRASH_DUMP || cmd == CMD_OEM_POST_START ||
+		    cmd == CMD_OEM_POST_END) {
 			return false;
 		}
 	}
@@ -249,25 +250,76 @@ void APP_GET_SELFTEST_RESULTS(ipmi_msg *msg)
 	return;
 }
 
-void frb2_wdt_timer_action(uint8_t action)
+void frb2_wdt_timer_action(uint8_t action, uint8_t timer)
 {
-	switch (action & 0x03) {
-	case HARD_RESET:
-		LOG_INF("frb2 power reset");
-		host_power_reset();
-		break;
-	case POWER_DOWN:
-		LOG_INF("frb2 power down");
-		host_power_off();
-		break;
-	case POWER_CYCLE:
-		LOG_INF("frb2 power cycle");
-		host_power_cycle();
-		break;
-	default:
-		LOG_INF("frb2 no action");
-		break;
+	struct pldm_addsel_data msg = { 0 };
+	if (timer == 0x01) // BIOS FRB2
+	{
+		switch (action & 0x03) {
+		case NO_ACTION:
+			LOG_INF("frb2 no action");
+			msg.event_type = BIOS_FRB2_WDT_EXPIRE;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case HARD_RESET:
+			LOG_INF("frb2 power reset");
+			host_power_reset();
+			msg.event_type = FRB2_WDT_HARD_RST;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case POWER_DOWN:
+			LOG_INF("frb2 power down");
+			host_power_off();
+			msg.event_type = FRB2_WDT_PWR_DOWN;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case POWER_CYCLE:
+			LOG_INF("frb2 power cycle");
+			host_power_cycle();
+			msg.event_type = FRB2_WDT_PWR_CYCLE;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		default:
+			return;
+		}
+	} else if (timer == 0x03) // OS Load
+	{
+		switch (action & 0x03) {
+		case NO_ACTION:
+			LOG_INF("OS Load no action");
+			msg.event_type = OS_LOAD_WDT_EXPIRED;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case HARD_RESET:
+			LOG_INF("frb2 power reset");
+			host_power_reset();
+			msg.event_type = OS_LOAD_WDT_HARD_RST;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case POWER_DOWN:
+			LOG_INF("frb2 power down");
+			host_power_off();
+			msg.event_type = OS_LOAD_WDT_PWR_DOWN;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		case POWER_CYCLE:
+			LOG_INF("frb2 power cycle");
+			host_power_cycle();
+			msg.event_type = OS_LOAD_WDT_PWR_CYCLE;
+			msg.assert_type = EVENT_ASSERTED;
+			break;
+		default:
+			return;
+		}
+	} else {
+		LOG_INF("Timer (%x) action not implement", timer);
+		return;
 	}
+
+	if (PLDM_SUCCESS != send_event_log_to_bmc(msg)) {
+		LOG_ERR("Failed to assert FRB2/OS Load timeout action event log.");
+	}
+	return;
 }
 
 void OEM_1S_DEBUG_GET_HW_SIGNAL(ipmi_msg *msg)
@@ -573,4 +625,62 @@ exit:
 	if (k_mutex_unlock(&i3c_dimm_mutex)) {
 		LOG_ERR("Failed to lock I3C dimm MUX");
 	}
+}
+
+void OEM_GET_BOOT_ORDER(ipmi_msg *msg)
+{
+	CHECK_NULL_ARG(msg);
+
+	if (msg->data_len != 0) {
+		LOG_ERR("Failed to get boot order because of invalid length: 0x%x", msg->data_len);
+		msg->completion_code = CC_INVALID_LENGTH;
+		return;
+	}
+
+	uint8_t ret = 0;
+	uint8_t length = BOOT_ORDER_LENGTH;
+
+	uint8_t *bootorder = (uint8_t *)malloc(sizeof(uint8_t) * length);
+	if (bootorder == NULL) {
+		LOG_ERR("Failed to allocate boot order buffer");
+		msg->completion_code = CC_UNSPECIFIED_ERROR;
+		return;
+	}
+
+	ret = plat_pldm_get_boot_order(BOOT_ORDER_LENGTH, bootorder);
+	if (ret != PLDM_SUCCESS) {
+		LOG_ERR("Failed to get boot order, ret: 0x%x", ret);
+		SAFE_FREE(bootorder);
+		msg->completion_code = CC_UNSPECIFIED_ERROR;
+		return;
+	}
+
+	msg->data_len = length;
+	memcpy(&msg->data[0], bootorder, length);
+	SAFE_FREE(bootorder);
+	msg->completion_code = CC_SUCCESS;
+	return;
+}
+
+void OEM_SET_BOOT_ORDER(ipmi_msg *msg)
+{
+	CHECK_NULL_ARG(msg);
+
+	if (msg->data_len != 6) {
+		LOG_ERR("Failed to set boot order because of invalid length: 0x%x", msg->data_len);
+		msg->completion_code = CC_INVALID_LENGTH;
+		return;
+	}
+
+	uint8_t ret = 0;
+	ret = plat_pldm_set_boot_order(msg->data);
+	if (ret != PLDM_SUCCESS) {
+		LOG_ERR("Failed to set boot order, ret: 0x%x", ret);
+		msg->completion_code = CC_UNSPECIFIED_ERROR;
+		return;
+	}
+
+	msg->completion_code = CC_SUCCESS;
+	msg->data_len = 0;
+	return;
 }

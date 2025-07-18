@@ -62,6 +62,15 @@
 #define FRU_PRODUCT_CUSTOM_DATA_1_REG 0x75
 #define FRU_PRODUCT_CUSTOM_DATA_2_REG 0x76
 
+#define CONTROL_VOL_CB_VR_ASIC_P0V75_VDDPHY_HBM0_HBM2_HBM4_REG 0x80
+#define CONTROL_VOL_CB_VR_ASIC_P0V75_VDDPHY_HBM1_HBM3_HBM5_REG 0x81
+#define CONTROL_VOL_CB_VR_ASIC_P1V1_VDDC_HBM0_HBM2_HBM4_REG 0x82
+#define CONTROL_VOL_CB_VR_ASIC_P1V1_VDDC_HBM1_HBM3_HBM5_REG 0x83
+#define CONTROL_VOL_CB_VR_ASIC_P0V4_VDDQL_HBM0_HBM2_HBM4_REG 0x84
+#define CONTROL_VOL_CB_VR_ASIC_P0V4_VDDQL_HBM1_HBM3_HBM5_REG 0x85
+#define CONTROL_VOL_CB_VR_ASIC_P1V8_VPP_HBM0_HBM2_HBM4_REG 0x86
+#define CONTROL_VOL_CB_VR_ASIC_P1V8_VPP_HBM1_HBM3_HBM5_REG 0x87
+
 #define SET_SENSOR_POLLING_COMMAND_REG 0xF0
 
 typedef enum i2c_bridge_command_error {
@@ -70,16 +79,16 @@ typedef enum i2c_bridge_command_error {
 	I2C_BRIDGE_COMMAND_FAILURE,
 } i2c_bridge_command_error;
 
-void update_sensor_data_2_5_table(void);
-void update_sensor_data_8_table(void);
-void sensor_data_table_init(void);
+void update_sensor_reading_table(void);
+void update_strap_capability_table(void);
+void plat_telemetry_table_init(void);
 
 typedef struct _telemetry_info_ telemetry_info;
 
 typedef struct _telemetry_info_ {
 	uint8_t telemetry_offset;
 	uint16_t data_size;
-	bool (*sensor_data_init)(telemetry_info *, uint8_t *);
+	bool (*telemetry_table_init)(telemetry_info *, uint8_t *);
 
 } telemetry_info;
 

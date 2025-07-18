@@ -29,7 +29,7 @@
 
 #define sensor_name_to_num(x) #x,
 
-#define SENSOR_POLL_STACK_SIZE 2048
+#define SENSOR_POLL_STACK_SIZE 4096
 #define NONE 0
 
 #define GET_FROM_CACHE 0x00
@@ -190,6 +190,9 @@ enum SENSOR_DEV {
 	sensor_dev_emc1413 = 0x48,
 	sensor_dev_bcm85658 = 0x49,
 	sensor_dev_tmp421 = 0x4A,
+	sensor_dev_bmr316 = 0x4B,
+	sensor_dev_lx6301 = 0x4C,
+	sensor_dev_ads7830 = 0x4D,
 	sensor_dev_max
 };
 

@@ -42,14 +42,17 @@ LOG_MODULE_REGISTER(kcs);
 kcs_dev *kcs;
 static bool proc_kcs_ok = false;
 
-void kcs_write(uint8_t index, uint8_t *buf, uint32_t buf_sz)
+int kcs_write(uint8_t index, uint8_t *buf, uint32_t buf_sz)
 {
 	int rc;
 
 	rc = kcs_aspeed_write(kcs[index].dev, buf, buf_sz);
 	if (rc < 0) {
 		LOG_ERR("Failed to write KCS data, rc = %d", rc);
+		return rc;
 	}
+
+	return 0;
 }
 
 bool get_kcs_ok()
@@ -95,7 +98,7 @@ static uint8_t init_text_string_value(const char *new_text_string, char **text_s
 	return pldm_smbios_get_text_strings_count(*text_strings);
 }
 
-static int init_bios_information(smbios_bios_information *bios_info, char *bios_version)
+static int init_bios_information(smbios_bios_information *bios_info, const char *bios_version)
 {
 	const uint8_t NOT_IMPLEMENTED = 0;
 
@@ -125,7 +128,7 @@ static int init_bios_information(smbios_bios_information *bios_info, char *bios_
 	return 0;
 }
 
-static int update_bios_information(char *bios_version_start_ptr, uint8_t bios_version_len)
+static int update_bios_information(const char *bios_version_start_ptr, uint8_t bios_version_len)
 {
 	int rc = -1;
 	smbios_bios_information *bios_info = malloc(sizeof(smbios_bios_information));
@@ -159,7 +162,7 @@ exit:
 	return rc;
 }
 
-static int send_bios_version_to_bmc(char *bios_version, uint8_t bios_version_len)
+static int send_bios_version_to_bmc(const char *bios_version, uint8_t bios_version_len)
 {
 	pldm_msg msg = { 0 };
 	uint8_t bmc_bus = I2C_BUS_BMC, bmc_interface = BMC_INTERFACE_I2C;
@@ -216,7 +219,7 @@ static int send_bios_version_to_bmc(char *bios_version, uint8_t bios_version_len
 	return 0;
 }
 
-static int send_crashdump_to_bmc(uint8_t *data, uint8_t data_length)
+static int send_crashdump_to_bmc(const uint8_t *data, uint8_t data_length)
 {
 	pldm_msg msg = { 0 };
 	uint8_t bmc_bus = I2C_BUS_BMC, bmc_interface = BMC_INTERFACE_I2C;
@@ -386,7 +389,7 @@ static void kcs_read_task(void *arvg0, void *arvg1, void *arvg2)
 					LOG_ERR("Failed to send crashdump data to BMC, rc = %d",
 						ret);
 				}
-				
+
 				uint8_t *kcs_buff;
 				kcs_buff = malloc(KCS_BUFF_SIZE * sizeof(uint8_t));
 				if (kcs_buff == NULL) {
@@ -406,6 +409,55 @@ static void kcs_read_task(void *arvg0, void *arvg1, void *arvg2)
 				}
 				SAFE_FREE(kcs_buff);
 			}
+			// IPMI OEM command for POST Start/End. Send SEL to BMC
+			if (((req->netfn == NETFN_OEM_REQ) && (req->cmd == CMD_OEM_POST_START)) ||
+			    ((req->netfn == NETFN_OEM_REQ) && (req->cmd == CMD_OEM_POST_END))) {
+				mctp_ext_params ext_params = { 0 };
+				uint8_t bmc_bus = I2C_BUS_BMC, bmc_interface = BMC_INTERFACE_I2C;
+
+				bmc_interface = pal_get_bmc_interface();
+				if (bmc_interface == BMC_INTERFACE_I3C) {
+					bmc_bus = I3C_BUS_BMC;
+					ext_params.type = MCTP_MEDIUM_TYPE_TARGET_I3C;
+					ext_params.i3c_ext_params.addr = I3C_STATIC_ADDR_BMC;
+					ext_params.ep = MCTP_EID_BMC;
+				} else {
+					bmc_bus = I2C_BUS_BMC;
+					ext_params.type = MCTP_MEDIUM_TYPE_SMBUS;
+					ext_params.smbus_ext_params.addr = I2C_ADDR_BMC;
+					ext_params.ep = MCTP_EID_BMC;
+				}
+
+				// return cc_success to bios
+				uint8_t *kcs_buff;
+				kcs_buff = malloc(KCS_BUFF_SIZE * sizeof(uint8_t));
+				if (kcs_buff == NULL) {
+					LOG_ERR("Failed to malloc for kcs_buff");
+					break;
+				}
+				kcs_buff[0] = (req->netfn | BIT(0)) << 2;
+				kcs_buff[1] = req->cmd;
+				kcs_buff[2] = CC_SUCCESS;
+				int kcs_rc = kcs_write(kcs_inst->index, kcs_buff, 3);
+				if (kcs_rc != 0) {
+					SAFE_FREE(kcs_buff);
+					break;
+				}
+
+				// Send event log to BMC only if kcs_write was successful
+				struct pldm_addsel_data msg = { 0 };
+				if (req->cmd == CMD_OEM_POST_START) {
+					msg.event_type = POST_STARTED;
+				} else {
+					msg.event_type = POST_ENDED;
+				}
+				msg.assert_type = EVENT_ASSERTED;
+				if (send_event_log_to_bmc(msg) != PLDM_SUCCESS) {
+					LOG_ERR("Failed to assert POST log");
+				};
+
+				SAFE_FREE(kcs_buff);
+			}
 #endif
 #endif
 			if ((req->netfn == NETFN_APP_REQ) &&
@@ -417,7 +469,7 @@ static void kcs_read_task(void *arvg0, void *arvg1, void *arvg2)
 				}
 #ifdef ENABLE_PLDM
 #ifndef ENABLE_OEM_PLDM
-				char *bios_version = ibuf + VERIONS_START_INDEX;
+				const char *bios_version = ibuf + VERIONS_START_INDEX;
 				uint8_t length = ibuf[LENGTH_INDEX];
 				ret = update_bios_information(bios_version, length);
 				if (ret < 0) {

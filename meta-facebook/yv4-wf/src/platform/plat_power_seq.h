@@ -22,7 +22,7 @@
 #define DC_ON_DELAY5_SEC 5
 #define VR_READY_DELAY_SEC 7
 #define CXL_READY_SECONDS 30
-#define CXL_READY_RETRY_TIMES 100
+#define CXL_READY_RETRY_TIMES 50
 #define CXL1_HEART_BEAT_LABEL "HB0"
 #define CXL2_HEART_BEAT_LABEL "HB1"
 #define CXL_READY_INTERVAL_SECONDS 3
@@ -33,7 +33,7 @@
 #define P1V8_POWER_OFF_DELAY_MSEC 3500
 
 #define POWER_SEQ_CTRL_STACK_SIZE 1000
-#define MONITOR_INTERVAL_SECONDS 5
+#define MONITOR_INTERVAL_SECONDS 10
 typedef struct _cxl_power_control_gpio {
 	int enclk_100m_osc;
 	int p075v_asic_en;
@@ -126,6 +126,7 @@ bool cxl2_vr_access(uint8_t sensor_num);
 void create_check_cxl_ready_thread();
 void cxl1_heartbeat_monitor_handler();
 void cxl2_heartbeat_monitor_handler();
+void init_cxl_heartbeat_monitor_work();
 void plat_pldm_sensor_clear_vr_fault(uint8_t vr_addr, uint8_t vr_bus, uint8_t page_cnt);
 
 #endif
